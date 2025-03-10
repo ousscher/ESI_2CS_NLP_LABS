@@ -33,68 +33,70 @@ from typing import Dict, List, Tuple, Set
 # ======================================================
 #                   Analyse CKY
 # ======================================================
+from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict
 
 class CKY:
-    def __init__(self, gram: List[Tuple[str, str, str]], lex: Dict[str, List[str]]):
-        # Grammar
-        self.gram = gram # list((A, B, C)| (A, B)) : A -> B C | A -> B
-        self.lex = lex # word --> liste(PoS)
 
-    # TODO: Complete this method
+    def __init__(self, gram: List[Tuple[str, str, str]], lex: Dict[str, List[str]]):
+        self.gram = gram
+        self.lex = lex
+
+    # TODO: complete this function
     def parse(self, sent: List[str]) -> List[List[List[Tuple[str, int, int, int]]]]:
-        T = []
-        N = len(sent)
-        for i in range(N):
-            T.append([[] for i in range(N)])
-            word = sent[i]
-            for A in self.lex[word]: # The word is supposed to exist in the lexicon
-                T[i][i].append((A, -1, -1, -1)) # All possible leaves are added
-            
-        # Complete here
-        # Fermeture unitaire pour les productions terminales sur la diagonale
-        for i in range(N):
-            added = True
-            while added:
-                added = False
-                for rule in self.gram:
-                    if len(rule) == 2:  # règle unaire A -> B
-                        A, B = rule
-                        if any(item[0] == B for item in T[i][i]) and not any(item[0] == A for item in T[i][i]):
-                            T[i][i].append((A, -1, -1, -1))
-                            added = True
-        
-        # Remplissage pour les spans de longueur 2 à N
-        for span in range(2, N + 1):
-            for i in range(N - span + 1):
-                j = i + span - 1
-                for k in range(i, j):
-                    for rule in self.gram:
-                        if len(rule) == 3:  # règle binaire A -> B C
-                            A, B, C = rule
-                            for iB, (B1, _, _, _) in enumerate(T[i][k]):
-                                if B1 == B:
-                                    for iC, (C1, _, _, _) in enumerate(T[k + 1][j]):
-                                        if C1 == C:
-                                            T[i][j].append((A, k, iB, iC))
-                # Fermeture unitaire après les règles binaires
-                added = True
-                while added:
-                    added = False
-                    for rule in self.gram:
-                        if len(rule) == 2:  # règle unaire A -> B
-                            A, B = rule
-                            if any(item[0] == B for item in T[i][j]) and not any(item[0] == A for item in T[i][j]):
-                                T[i][j].append((A, -1, -1, -1))
-                                added = True
+        n = len(sent)
+        T = [[[] for _ in range(n)] for _ in range(n)]
+
+        for i, word in enumerate(sent):
+            tags = self.lex.get(word, [])
+            T[i][i].extend((tag, -1, -1, -1) for tag in tags)
+
+            queue = list(T[i][i])
+            seen = set(queue)
+            while queue:
+                B = queue.pop(0)[0]
+                for A, B_rule in filter(lambda r: len(r) == 2, self.gram):
+                    if B_rule == B:
+                        new_entry = (A, -1, next((idx for idx, e in enumerate(T[i][i]) if e[0] == B), -1), -1)
+                        if new_entry not in seen:
+                            T[i][i].append(new_entry)
+                            queue.append(new_entry)
+                            seen.add(new_entry)
+
+        def process_cell(i, j):
+            for k in range(i, j):
+                for A, B, C in filter(lambda r: len(r) == 3, self.gram):
+                    left_matches = [entry for entry in T[i][k] if entry[0] == B]
+                    right_matches = [entry for entry in T[k+1][j] if entry[0] == C]
+                    T[i][j].extend((A, k, T[i][k].index(lb), T[k+1][j].index(rb))
+                                   for lb in left_matches for rb in right_matches)
+
+        for length in range(2, n + 1):
+            for i in range(n - length + 1):
+                j = i + length - 1
+                process_cell(i, j)
+
+                queue = list(T[i][j])
+                seen = set(queue)
+                while queue:
+                    B = queue.pop(0)[0]
+                    for A, B_rule in filter(lambda r: len(r) == 2, self.gram):
+                        if B_rule == B:
+                            new_entry = (A, -1, next((idx for idx, e in enumerate(T[i][j]) if e[0] == B), -1), -1)
+                            if new_entry not in seen:
+                                T[i][j].append(new_entry)
+                                queue.append(new_entry)
+                                seen.add(new_entry)
 
         return T
 
     def export_json(self):
-        return self.__dict__.copy()
+        return {k: v for k, v in self.__dict__.items()}
 
     def import_json(self, data):
-        for key in data:
-            self.__dict__[key] = data[key]
+        self.__dict__.update(data)
+
+
 
 # ======================================================
 #                Parsing
@@ -164,32 +166,23 @@ def compute_arc_counts(ref, sys):
         return ref_arcs, sys_arcs, common_arcs
     
     
+
+
 def construct(T, sent, i, j, pos):
     A, k, iB, iC = T[i][j][pos]
-    #A = A.upper()
     if k >= 0:
         left = construct(T, sent, i, k, iB)
         if iC == -1:
             return (A, left)
         right = construct(T, sent, k+1, j, iC)
         return (A, left, right)
-    return (A, sent[i])
-
-# def construct(T, sent, i, j, pos):
-#     A, k, iB, iC = T[i][j][pos]
-#     if k >= 0:
-#         left = construct(T, sent, i, k, iB)
-#         if iC == -1:
-#             return (A, left)
-#         right = construct(T, sent, k+1, j, iC)
-#         return (A, left, right)
-#     else:
-#         # lahna lazm nkmlo derivation
-#         if iB != -1:
-#             child = construct(T, sent, i, j, iB)
-#             return (A, child)
-#         else:
-#             return (A, sent[i])
+    else:
+        # lahna lazm nkmlo derivation
+        if iB != -1:
+            child = construct(T, sent, i, j, iB)
+            return (A, child)
+        else:
+            return (A, sent[i])
         
 def parse_tuple(string):
     string = re.sub(r'([^\s(),]+)', "'\\1'", string)
